@@ -39,6 +39,8 @@ func Lgetxattr(path string, attr string) ([]byte, error) {
 	switch {
 	case errno == unix.ENODATA:
 		return nil, nil
+	case errno == unix.EOPNOTSUPP:
+		return nil, nil
 	case errno != nil:
 		return nil, &os.PathError{Op: "lgetxattr", Path: path, Err: errno}
 	}
@@ -62,6 +64,11 @@ func Llistxattr(path string) ([]string, error) {
 	dest := make([]byte, 128)
 	sz, errno := unix.Llistxattr(path, dest)
 
+	var attrs []string
+	if errno == unix.EOPNOTSUPP {
+		return attrs, nil
+	}
+
 	for errno == unix.ERANGE {
 		// Buffer too small, use zero-sized buffer to get the actual size
 		sz, errno = unix.Llistxattr(path, []byte{})
@@ -76,7 +83,6 @@ func Llistxattr(path string) ([]string, error) {
 		return nil, &os.PathError{Op: "llistxattr", Path: path, Err: errno}
 	}
 
-	var attrs []string
 	for _, token := range bytes.Split(dest[:sz], []byte{0}) {
 		if len(token) > 0 {
 			attrs = append(attrs, string(token))
