@@ -2,7 +2,6 @@ package graphdriver
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"os"
 
@@ -88,13 +87,13 @@ func ChownPathByMaps(path string, toContainer, toHost *idtools.IDMappings) error
 	cmd.Stdin = bytes.NewReader(config)
 	output, err := cmd.CombinedOutput()
 	if len(output) > 0 && err != nil {
-		return fmt.Errorf("%s: %w", string(output), err)
+		return fmt.Errorf("%v: %s", err, string(output))
 	}
 	if err != nil {
 		return err
 	}
 	if len(output) > 0 {
-		return errors.New(string(output))
+		return fmt.Errorf("%s", string(output))
 	}
 
 	return nil
@@ -115,7 +114,7 @@ func NewNaiveLayerIDMapUpdater(driver ProtoDriver) LayerIDMapUpdater {
 // on-disk owner UIDs and GIDs which are "host" values in the first map with
 // UIDs and GIDs for "host" values from the second map which correspond to the
 // same "container" IDs.
-func (n *naiveLayerIDMapUpdater) UpdateLayerIDMap(id string, toContainer, toHost *idtools.IDMappings, mountLabel string) (retErr error) {
+func (n *naiveLayerIDMapUpdater) UpdateLayerIDMap(id string, toContainer, toHost *idtools.IDMappings, mountLabel string) error {
 	driver := n.ProtoDriver
 	options := MountOpts{
 		MountLabel: mountLabel,
@@ -124,7 +123,9 @@ func (n *naiveLayerIDMapUpdater) UpdateLayerIDMap(id string, toContainer, toHost
 	if err != nil {
 		return err
 	}
-	defer driverPut(driver, id, &retErr)
+	defer func() {
+		driver.Put(id)
+	}()
 
 	return ChownPathByMaps(layerFs, toContainer, toHost)
 }

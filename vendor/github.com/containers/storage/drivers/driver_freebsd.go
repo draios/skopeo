@@ -13,7 +13,7 @@ const (
 
 var (
 	// Slice of drivers that should be used in an order
-	Priority = []string{
+	priority = []string{
 		"zfs",
 		"vfs",
 	}
@@ -31,7 +31,8 @@ func NewDefaultChecker() Checker {
 	return &defaultChecker{}
 }
 
-type defaultChecker struct{}
+type defaultChecker struct {
+}
 
 func (c *defaultChecker) IsMounted(path string) bool {
 	m, _ := mount.Mounted(path)

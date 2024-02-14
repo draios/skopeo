@@ -8,10 +8,6 @@ import (
 	"sync"
 )
 
-// WalkFunc is the type of the function called by Walk to visit each
-// file or directory. It is an alias for [filepath.WalkFunc].
-//
-// Deprecated: use [github.com/opencontainers/selinux/pkg/pwalkdir] and [fs.WalkDirFunc].
 type WalkFunc = filepath.WalkFunc
 
 // Walk is a wrapper for filepath.Walk which can call multiple walkFn
@@ -33,8 +29,6 @@ type WalkFunc = filepath.WalkFunc
 // - if more than one walkFn instance will return an error, only one
 // of such errors will be propagated and returned by Walk, others
 // will be silently discarded.
-//
-// Deprecated: use [github.com/opencontainers/selinux/pkg/pwalkdir.Walk]
 func Walk(root string, walkFn WalkFunc) error {
 	return WalkN(root, walkFn, runtime.NumCPU()*2)
 }
@@ -44,8 +38,6 @@ func Walk(root string, walkFn WalkFunc) error {
 // num walkFn will be called at any one time.
 //
 // Please see Walk documentation for caveats of using this function.
-//
-// Deprecated: use [github.com/opencontainers/selinux/pkg/pwalkdir.WalkN]
 func WalkN(root string, walkFn WalkFunc, num int) error {
 	// make sure limit is sensible
 	if num < 1 {
@@ -118,6 +110,6 @@ func WalkN(root string, walkFn WalkFunc, num int) error {
 // walkArgs holds the arguments that were passed to the Walk or WalkN
 // functions.
 type walkArgs struct {
-	info *os.FileInfo
 	path string
+	info *os.FileInfo
 }

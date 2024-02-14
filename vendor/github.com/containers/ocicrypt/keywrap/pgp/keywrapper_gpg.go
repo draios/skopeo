@@ -21,15 +21,16 @@ import (
 	"crypto"
 	"crypto/rand"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/mail"
 	"strconv"
 	"strings"
 
 	"github.com/containers/ocicrypt/config"
 	"github.com/containers/ocicrypt/keywrap"
+	"github.com/pkg/errors"
 	"golang.org/x/crypto/openpgp"
 	"golang.org/x/crypto/openpgp/packet"
 )
@@ -63,7 +64,7 @@ func (kw *gpgKeyWrapper) WrapKeys(ec *config.EncryptConfig, optsData []byte) ([]
 	ciphertext := new(bytes.Buffer)
 	el, err := kw.createEntityList(ec)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create entity list: %w", err)
+		return nil, errors.Wrap(err, "unable to create entity list")
 	}
 	if len(el) == 0 {
 		// nothing to do -- not an error
@@ -99,7 +100,7 @@ func (kw *gpgKeyWrapper) UnwrapKey(dc *config.DecryptConfig, pgpPacket []byte) (
 		r := bytes.NewBuffer(pgpPrivateKey)
 		entityList, err := openpgp.ReadKeyRing(r)
 		if err != nil {
-			return nil, fmt.Errorf("unable to parse private keys: %w", err)
+			return nil, errors.Wrap(err, "unable to parse private keys")
 		}
 
 		var prompt openpgp.PromptFunction
@@ -125,7 +126,7 @@ func (kw *gpgKeyWrapper) UnwrapKey(dc *config.DecryptConfig, pgpPacket []byte) (
 			continue
 		}
 		// we get the plain key options back
-		optsData, err := io.ReadAll(md.UnverifiedBody)
+		optsData, err := ioutil.ReadAll(md.UnverifiedBody)
 		if err != nil {
 			continue
 		}
@@ -141,7 +142,7 @@ func (kw *gpgKeyWrapper) GetKeyIdsFromPacket(b64pgpPackets string) ([]uint64, er
 	for _, b64pgpPacket := range strings.Split(b64pgpPackets, ",") {
 		pgpPacket, err := base64.StdEncoding.DecodeString(b64pgpPacket)
 		if err != nil {
-			return nil, fmt.Errorf("could not decode base64 encoded PGP packet: %w", err)
+			return nil, errors.Wrapf(err, "could not decode base64 encoded PGP packet")
 		}
 		newids, err := kw.getKeyIDs(pgpPacket)
 		if err != nil {
@@ -165,7 +166,7 @@ ParsePackets:
 			break ParsePackets
 		}
 		if err != nil {
-			return []uint64{}, fmt.Errorf("packets.Next() failed: %w", err)
+			return []uint64{}, errors.Wrapf(err, "packets.Next() failed")
 		}
 		switch p := p.(type) {
 		case *packet.EncryptedKey:

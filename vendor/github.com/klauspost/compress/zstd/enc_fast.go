@@ -43,7 +43,7 @@ func (e *fastEncoder) Encode(blk *blockEnc, src []byte) {
 	)
 
 	// Protect against e.cur wraparound.
-	for e.cur >= e.bufferReset-int32(len(e.hist)) {
+	for e.cur >= bufferReset {
 		if len(e.hist) == 0 {
 			for i := range e.table[:] {
 				e.table[i] = tableEntry{}
@@ -133,7 +133,8 @@ encodeLoop:
 			if canRepeat && repIndex >= 0 && load3232(src, repIndex) == uint32(cv>>16) {
 				// Consider history as well.
 				var seq seq
-				length := 4 + e.matchlen(s+6, repIndex+4, src)
+				var length int32
+				length = 4 + e.matchlen(s+6, repIndex+4, src)
 				seq.matchLen = uint32(length - zstdMinMatch)
 
 				// We might be able to match backwards.
@@ -303,13 +304,13 @@ func (e *fastEncoder) EncodeNoHist(blk *blockEnc, src []byte) {
 		minNonLiteralBlockSize = 1 + 1 + inputMargin
 	)
 	if debugEncoder {
-		if len(src) > maxCompressedBlockSize {
+		if len(src) > maxBlockSize {
 			panic("src too big")
 		}
 	}
 
 	// Protect against e.cur wraparound.
-	if e.cur >= e.bufferReset {
+	if e.cur >= bufferReset {
 		for i := range e.table[:] {
 			e.table[i] = tableEntry{}
 		}
@@ -537,7 +538,7 @@ encodeLoop:
 		println("returning, recent offsets:", blk.recentOffsets, "extra literals:", blk.extraLits)
 	}
 	// We do not store history, so we must offset e.cur to avoid false matches for next user.
-	if e.cur < e.bufferReset {
+	if e.cur < bufferReset {
 		e.cur += int32(len(src))
 	}
 }
@@ -554,9 +555,11 @@ func (e *fastEncoderDict) Encode(blk *blockEnc, src []byte) {
 		return
 	}
 	// Protect against e.cur wraparound.
-	for e.cur >= e.bufferReset-int32(len(e.hist)) {
+	for e.cur >= bufferReset {
 		if len(e.hist) == 0 {
-			e.table = [tableSize]tableEntry{}
+			for i := range e.table[:] {
+				e.table[i] = tableEntry{}
+			}
 			e.cur = e.maxMatchOff
 			break
 		}
@@ -644,7 +647,8 @@ encodeLoop:
 			if canRepeat && repIndex >= 0 && load3232(src, repIndex) == uint32(cv>>16) {
 				// Consider history as well.
 				var seq seq
-				length := 4 + e.matchlen(s+6, repIndex+4, src)
+				var length int32
+				length = 4 + e.matchlen(s+6, repIndex+4, src)
 
 				seq.matchLen = uint32(length - zstdMinMatch)
 
@@ -829,12 +833,13 @@ func (e *fastEncoderDict) Reset(d *dict, singleBlock bool) {
 		}
 		if true {
 			end := e.maxMatchOff + int32(len(d.content)) - 8
-			for i := e.maxMatchOff; i < end; i += 2 {
+			for i := e.maxMatchOff; i < end; i += 3 {
 				const hashLog = tableBits
 
 				cv := load6432(d.content, i-e.maxMatchOff)
-				nextHash := hashLen(cv, hashLog, tableFastHashLen)     // 0 -> 6
-				nextHash1 := hashLen(cv>>8, hashLog, tableFastHashLen) // 1 -> 7
+				nextHash := hashLen(cv, hashLog, tableFastHashLen)      // 0 -> 5
+				nextHash1 := hashLen(cv>>8, hashLog, tableFastHashLen)  // 1 -> 6
+				nextHash2 := hashLen(cv>>16, hashLog, tableFastHashLen) // 2 -> 7
 				e.dictTable[nextHash] = tableEntry{
 					val:    uint32(cv),
 					offset: i,
@@ -842,6 +847,10 @@ func (e *fastEncoderDict) Reset(d *dict, singleBlock bool) {
 				e.dictTable[nextHash1] = tableEntry{
 					val:    uint32(cv >> 8),
 					offset: i + 1,
+				}
+				e.dictTable[nextHash2] = tableEntry{
+					val:    uint32(cv >> 16),
+					offset: i + 2,
 				}
 			}
 		}
@@ -862,8 +871,7 @@ func (e *fastEncoderDict) Reset(d *dict, singleBlock bool) {
 	const shardCnt = tableShardCnt
 	const shardSize = tableShardSize
 	if e.allDirty || dirtyShardCnt > shardCnt*4/6 {
-		//copy(e.table[:], e.dictTable)
-		e.table = *(*[tableSize]tableEntry)(e.dictTable)
+		copy(e.table[:], e.dictTable)
 		for i := range e.tableShardDirty {
 			e.tableShardDirty[i] = false
 		}
@@ -875,8 +883,7 @@ func (e *fastEncoderDict) Reset(d *dict, singleBlock bool) {
 			continue
 		}
 
-		//copy(e.table[i*shardSize:(i+1)*shardSize], e.dictTable[i*shardSize:(i+1)*shardSize])
-		*(*[shardSize]tableEntry)(e.table[i*shardSize:]) = *(*[shardSize]tableEntry)(e.dictTable[i*shardSize:])
+		copy(e.table[i*shardSize:(i+1)*shardSize], e.dictTable[i*shardSize:(i+1)*shardSize])
 		e.tableShardDirty[i] = false
 	}
 	e.allDirty = false

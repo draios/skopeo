@@ -18,13 +18,12 @@ package jwe
 
 import (
 	"crypto/ecdsa"
-	"errors"
-	"fmt"
 
 	"github.com/containers/ocicrypt/config"
 	"github.com/containers/ocicrypt/keywrap"
 	"github.com/containers/ocicrypt/utils"
-	"github.com/go-jose/go-jose/v3"
+	"github.com/pkg/errors"
+	jose "gopkg.in/square/go-jose.v2"
 )
 
 type jweKeyWrapper struct {
@@ -55,11 +54,11 @@ func (kw *jweKeyWrapper) WrapKeys(ec *config.EncryptConfig, optsData []byte) ([]
 
 	encrypter, err := jose.NewMultiEncrypter(jose.A256GCM, joseRecipients, nil)
 	if err != nil {
-		return nil, fmt.Errorf("jose.NewMultiEncrypter failed: %w", err)
+		return nil, errors.Wrapf(err, "jose.NewMultiEncrypter failed")
 	}
 	jwe, err := encrypter.Encrypt(optsData)
 	if err != nil {
-		return nil, fmt.Errorf("JWE Encrypt failed: %w", err)
+		return nil, errors.Wrapf(err, "JWE Encrypt failed")
 	}
 	return []byte(jwe.FullSerialize()), nil
 }

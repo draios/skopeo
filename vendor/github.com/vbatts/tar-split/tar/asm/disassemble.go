@@ -135,15 +135,13 @@ func NewInputTarStream(r io.Reader, p storage.Packer, fp storage.FilePutter) (io
 				}
 				isEOF = true
 			}
-			if n != 0 {
-				_, err = p.AddEntry(storage.Entry{
-					Type:    storage.SegmentType,
-					Payload: paddingChunk[:n],
-				})
-				if err != nil {
-					pW.CloseWithError(err)
-					return
-				}
+			_, err = p.AddEntry(storage.Entry{
+				Type:    storage.SegmentType,
+				Payload: paddingChunk[:n],
+			})
+			if err != nil {
+				pW.CloseWithError(err)
+				return
 			}
 			if isEOF {
 				break

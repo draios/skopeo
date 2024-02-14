@@ -7,7 +7,6 @@ package flate
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -85,22 +84,24 @@ type advancedState struct {
 	length         int
 	offset         int
 	maxInsertIndex int
-	chainHead      int
-	hashOffset     int
-
-	ii uint16 // position of last match, intended to overflow to reset.
-
-	// input window: unprocessed data is window[index:windowEnd]
-	index     int
-	hashMatch [maxMatchLength + minMatchLength]uint32
 
 	// Input hash chains
 	// hashHead[hashValue] contains the largest inputIndex with the specified hash value
 	// If hashHead[hashValue] is within the current window, then
 	// hashPrev[hashHead[hashValue] & windowMask] contains the previous index
 	// with the same hash value.
-	hashHead [hashSize]uint32
-	hashPrev [windowSize]uint32
+	chainHead  int
+	hashHead   [hashSize]uint32
+	hashPrev   [windowSize]uint32
+	hashOffset int
+
+	// input window: unprocessed data is window[index:windowEnd]
+	index          int
+	estBitsPerByte int
+	hashMatch      [maxMatchLength + minMatchLength]uint32
+
+	hash uint32
+	ii   uint16 // position of last match, intended to overflow to reset.
 }
 
 type compressor struct {
@@ -131,8 +132,7 @@ func (d *compressor) fillDeflate(b []byte) int {
 	s := d.state
 	if s.index >= 2*windowSize-(minMatchLength+maxMatchLength) {
 		// shift the window by windowSize
-		//copy(d.window[:], d.window[windowSize:2*windowSize])
-		*(*[windowSize]byte)(d.window) = *(*[windowSize]byte)(d.window[windowSize:])
+		copy(d.window[:], d.window[windowSize:2*windowSize])
 		s.index -= windowSize
 		d.windowEnd -= windowSize
 		if d.blockStart >= windowSize {
@@ -259,6 +259,7 @@ func (d *compressor) fillWindow(b []byte) {
 			// Set the head of the hash chain to us.
 			s.hashHead[newH] = uint32(di + s.hashOffset)
 		}
+		s.hash = newH
 	}
 	// Update window information.
 	d.windowEnd += n
@@ -294,6 +295,7 @@ func (d *compressor) findMatch(pos int, prevHead int, lookahead int) (length, of
 	}
 	offset = 0
 
+	cGain := 0
 	if d.chain < 100 {
 		for i := prevHead; tries > 0; tries-- {
 			if wEnd == win[i+length] {
@@ -321,14 +323,10 @@ func (d *compressor) findMatch(pos int, prevHead int, lookahead int) (length, of
 		return
 	}
 
-	// Minimum gain to accept a match.
-	cGain := 4
-
 	// Some like it higher (CSV), some like it lower (JSON)
-	const baseCost = 3
+	const baseCost = 6
 	// Base is 4 bytes at with an additional cost.
 	// Matches must be better than this.
-
 	for i := prevHead; tries > 0; tries-- {
 		if wEnd == win[i+length] {
 			n := matchLen(win[i:i+minMatchLook], wPos)
@@ -336,7 +334,7 @@ func (d *compressor) findMatch(pos int, prevHead int, lookahead int) (length, of
 				// Calculate gain. Estimate
 				newGain := d.h.bitLengthRaw(wPos[:n]) - int(offsetExtraBits[offsetCode(uint32(pos-i))]) - baseCost - int(lengthExtraBits[lengthCodes[(n-3)&255]])
 
-				//fmt.Println("gain:", newGain, "prev:", cGain, "raw:", d.h.bitLengthRaw(wPos[:n]), "this-len:", n, "prev-len:", length)
+				//fmt.Println(n, "gain:", newGain, "prev:", cGain, "raw:", d.h.bitLengthRaw(wPos[:n]))
 				if newGain > cGain {
 					length = n
 					offset = pos - i
@@ -377,12 +375,6 @@ func hash4(b []byte) uint32 {
 	return hash4u(binary.LittleEndian.Uint32(b), hashBits)
 }
 
-// hash4 returns the hash of u to fit in a hash table with h bits.
-// Preferably h should be a constant and should always be <32.
-func hash4u(u uint32, h uint8) uint32 {
-	return (u * prime4bytes) >> (32 - h)
-}
-
 // bulkHash4 will compute hashes using the same
 // algorithm as hash4
 func bulkHash4(b []byte, dst []uint32) {
@@ -411,6 +403,7 @@ func (d *compressor) initDeflate() {
 	s.hashOffset = 1
 	s.length = minMatchLength - 1
 	s.offset = 0
+	s.hash = 0
 	s.chainHead = -1
 }
 
@@ -439,6 +432,9 @@ func (d *compressor) deflateLazy() {
 	}
 
 	s.maxInsertIndex = d.windowEnd - (minMatchLength - 1)
+	if s.index < s.maxInsertIndex {
+		s.hash = hash4(d.window[s.index:])
+	}
 
 	for {
 		if sanity && s.index > d.windowEnd {
@@ -470,11 +466,11 @@ func (d *compressor) deflateLazy() {
 		}
 		if s.index < s.maxInsertIndex {
 			// Update the hash
-			hash := hash4(d.window[s.index:])
-			ch := s.hashHead[hash]
+			s.hash = hash4(d.window[s.index:])
+			ch := s.hashHead[s.hash&hashMask]
 			s.chainHead = int(ch)
 			s.hashPrev[s.index&windowMask] = ch
-			s.hashHead[hash] = uint32(s.index + s.hashOffset)
+			s.hashHead[s.hash&hashMask] = uint32(s.index + s.hashOffset)
 		}
 		prevLength := s.length
 		prevOffset := s.offset
@@ -493,103 +489,27 @@ func (d *compressor) deflateLazy() {
 		}
 
 		if prevLength >= minMatchLength && s.length <= prevLength {
-			// No better match, but check for better match at end...
+			// Check for better match at end...
 			//
-			// Skip forward a number of bytes.
-			// Offset of 2 seems to yield best results. 3 is sometimes better.
+			// checkOff must be >=2 since we otherwise risk checking s.index
+			// Offset of 2 seems to yield best results.
 			const checkOff = 2
-
-			// Check all, except full length
-			if prevLength < maxMatchLength-checkOff {
-				prevIndex := s.index - 1
-				if prevIndex+prevLength < s.maxInsertIndex {
-					end := lookahead
-					if lookahead > maxMatchLength+checkOff {
-						end = maxMatchLength + checkOff
-					}
-					end += prevIndex
-
-					// Hash at match end.
-					h := hash4(d.window[prevIndex+prevLength:])
-					ch2 := int(s.hashHead[h]) - s.hashOffset - prevLength
-					if prevIndex-ch2 != prevOffset && ch2 > minIndex+checkOff {
-						length := matchLen(d.window[prevIndex+checkOff:end], d.window[ch2+checkOff:])
-						// It seems like a pure length metric is best.
-						if length > prevLength {
-							prevLength = length
-							prevOffset = prevIndex - ch2
-
-							// Extend back...
-							for i := checkOff - 1; i >= 0; i-- {
-								if prevLength >= maxMatchLength || d.window[prevIndex+i] != d.window[ch2+i] {
-									// Emit tokens we "owe"
-									for j := 0; j <= i; j++ {
-										d.tokens.AddLiteral(d.window[prevIndex+j])
-										if d.tokens.n == maxFlateBlockTokens {
-											// The block includes the current character
-											if d.err = d.writeBlock(&d.tokens, s.index, false); d.err != nil {
-												return
-											}
-											d.tokens.Reset()
-										}
-										s.index++
-										if s.index < s.maxInsertIndex {
-											h := hash4(d.window[s.index:])
-											ch := s.hashHead[h]
-											s.chainHead = int(ch)
-											s.hashPrev[s.index&windowMask] = ch
-											s.hashHead[h] = uint32(s.index + s.hashOffset)
-										}
-									}
-									break
-								} else {
-									prevLength++
-								}
-							}
-						} else if false {
-							// Check one further ahead.
-							// Only rarely better, disabled for now.
-							prevIndex++
-							h := hash4(d.window[prevIndex+prevLength:])
-							ch2 := int(s.hashHead[h]) - s.hashOffset - prevLength
-							if prevIndex-ch2 != prevOffset && ch2 > minIndex+checkOff {
-								length := matchLen(d.window[prevIndex+checkOff:end], d.window[ch2+checkOff:])
-								// It seems like a pure length metric is best.
-								if length > prevLength+checkOff {
-									prevLength = length
-									prevOffset = prevIndex - ch2
-									prevIndex--
-
-									// Extend back...
-									for i := checkOff; i >= 0; i-- {
-										if prevLength >= maxMatchLength || d.window[prevIndex+i] != d.window[ch2+i-1] {
-											// Emit tokens we "owe"
-											for j := 0; j <= i; j++ {
-												d.tokens.AddLiteral(d.window[prevIndex+j])
-												if d.tokens.n == maxFlateBlockTokens {
-													// The block includes the current character
-													if d.err = d.writeBlock(&d.tokens, s.index, false); d.err != nil {
-														return
-													}
-													d.tokens.Reset()
-												}
-												s.index++
-												if s.index < s.maxInsertIndex {
-													h := hash4(d.window[s.index:])
-													ch := s.hashHead[h]
-													s.chainHead = int(ch)
-													s.hashPrev[s.index&windowMask] = ch
-													s.hashHead[h] = uint32(s.index + s.hashOffset)
-												}
-											}
-											break
-										} else {
-											prevLength++
-										}
-									}
-								}
-							}
-						}
+			prevIndex := s.index - 1
+			if prevIndex+prevLength+checkOff < s.maxInsertIndex {
+				end := lookahead
+				if lookahead > maxMatchLength {
+					end = maxMatchLength
+				}
+				end += prevIndex
+				idx := prevIndex + prevLength - (4 - checkOff)
+				h := hash4(d.window[idx:])
+				ch2 := int(s.hashHead[h&hashMask]) - s.hashOffset - prevLength + (4 - checkOff)
+				if ch2 > minIndex {
+					length := matchLen(d.window[prevIndex:end], d.window[ch2:])
+					// It seems like a pure length metric is best.
+					if length > prevLength {
+						prevLength = length
+						prevOffset = prevIndex - ch2
 					}
 				}
 			}
@@ -627,6 +547,7 @@ func (d *compressor) deflateLazy() {
 					// Set the head of the hash chain to us.
 					s.hashHead[newH] = uint32(di + s.hashOffset)
 				}
+				s.hash = newH
 			}
 
 			s.index = newIndex
@@ -834,12 +755,6 @@ func (d *compressor) init(w io.Writer, level int) (err error) {
 		d.initDeflate()
 		d.fill = (*compressor).fillDeflate
 		d.step = (*compressor).deflateLazy
-	case -level >= MinCustomWindowSize && -level <= MaxCustomWindowSize:
-		d.w.logNewTablePenalty = 7
-		d.fast = &fastEncL5Window{maxOffset: int32(-level), cur: maxStoreBlockSize}
-		d.window = make([]byte, maxStoreBlockSize)
-		d.fill = (*compressor).fillBlock
-		d.step = (*compressor).storeFast
 	default:
 		return fmt.Errorf("flate: invalid compression level %d: want value in range [-2, 9]", level)
 	}
@@ -878,6 +793,7 @@ func (d *compressor) reset(w io.Writer) {
 		d.tokens.Reset()
 		s.length = minMatchLength - 1
 		s.offset = 0
+		s.hash = 0
 		s.ii = 0
 		s.maxInsertIndex = 0
 	}
@@ -934,28 +850,6 @@ func NewWriterDict(w io.Writer, level int, dict []byte) (*Writer, error) {
 	zw.d.fillWindow(dict)
 	zw.dict = append(zw.dict, dict...) // duplicate dictionary for Reset method.
 	return zw, err
-}
-
-// MinCustomWindowSize is the minimum window size that can be sent to NewWriterWindow.
-const MinCustomWindowSize = 32
-
-// MaxCustomWindowSize is the maximum custom window that can be sent to NewWriterWindow.
-const MaxCustomWindowSize = windowSize
-
-// NewWriterWindow returns a new Writer compressing data with a custom window size.
-// windowSize must be from MinCustomWindowSize to MaxCustomWindowSize.
-func NewWriterWindow(w io.Writer, windowSize int) (*Writer, error) {
-	if windowSize < MinCustomWindowSize {
-		return nil, errors.New("flate: requested window size less than MinWindowSize")
-	}
-	if windowSize > MaxCustomWindowSize {
-		return nil, errors.New("flate: requested window size bigger than MaxCustomWindowSize")
-	}
-	var dw Writer
-	if err := dw.d.init(w, -windowSize); err != nil {
-		return nil, err
-	}
-	return &dw, nil
 }
 
 // A Writer takes data written to it and writes the compressed

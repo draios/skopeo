@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"strings"
 
@@ -67,7 +68,7 @@ func (factory *fsLoaderFactory) refContents(ref gojsonreference.JsonReference) (
 	}
 	defer f.Close()
 
-	return io.ReadAll(f)
+	return ioutil.ReadAll(f)
 }
 
 // fsLoader implements gojsonschema.JSONLoader by reading the document named by source from a fsLoaderFactory.
@@ -77,7 +78,7 @@ type fsLoader struct {
 }
 
 // JsonSource implements gojsonschema.JSONLoader.JsonSource. The "Json" capitalization needs to be maintained to conform to the interface.
-func (l *fsLoader) JsonSource() interface{} { // revive:disable-line:var-naming
+func (l *fsLoader) JsonSource() interface{} { // nolint: golint
 	return l.source
 }
 
@@ -116,7 +117,7 @@ func decodeJSONUsingNumber(r io.Reader) (interface{}, error) {
 }
 
 // JsonReference implements gojsonschema.JSONLoader.JsonReference. The "Json" capitalization needs to be maintained to conform to the interface.
-func (l *fsLoader) JsonReference() (gojsonreference.JsonReference, error) { // revive:disable-line:var-naming
+func (l *fsLoader) JsonReference() (gojsonreference.JsonReference, error) { // nolint: golint
 	return gojsonreference.NewJsonReference(l.JsonSource().(string))
 }
 

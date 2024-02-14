@@ -17,11 +17,10 @@
 package config
 
 import (
-	"errors"
-	"fmt"
+	"github.com/containers/ocicrypt/crypto/pkcs11"
 	"strings"
 
-	"github.com/containers/ocicrypt/crypto/pkcs11"
+	"github.com/pkg/errors"
 	"gopkg.in/yaml.v3"
 )
 
@@ -86,7 +85,7 @@ func EncryptWithPkcs11(pkcs11Config *pkcs11.Pkcs11Config, pkcs11Pubkeys, pkcs11Y
 		}
 		p11confYaml, err := yaml.Marshal(pkcs11Config)
 		if err != nil {
-			return CryptoConfig{}, fmt.Errorf("Could not marshal Pkcs11Config to Yaml: %w", err)
+			return CryptoConfig{}, errors.Wrapf(err, "Could not marshal Pkcs11Config to Yaml")
 		}
 
 		dc = DecryptConfig{
@@ -224,7 +223,7 @@ func DecryptWithGpgPrivKeys(gpgPrivKeys, gpgPrivKeysPwds [][]byte) (CryptoConfig
 func DecryptWithPkcs11Yaml(pkcs11Config *pkcs11.Pkcs11Config, pkcs11Yamls [][]byte) (CryptoConfig, error) {
 	p11confYaml, err := yaml.Marshal(pkcs11Config)
 	if err != nil {
-		return CryptoConfig{}, fmt.Errorf("Could not marshal Pkcs11Config to Yaml: %w", err)
+		return CryptoConfig{}, errors.Wrapf(err, "Could not marshal Pkcs11Config to Yaml")
 	}
 
 	dc := DecryptConfig{

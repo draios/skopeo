@@ -61,12 +61,6 @@
         }
       ]
     },
-    "base64": {
-      "type": "string",
-      "media": {
-        "binaryEncoding": "base64"
-      }
-    },
     "stringPointer": {
       "oneOf": [
         {

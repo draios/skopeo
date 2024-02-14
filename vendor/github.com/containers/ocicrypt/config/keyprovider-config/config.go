@@ -18,7 +18,8 @@ package config
 
 import (
 	"encoding/json"
-	"fmt"
+	"github.com/pkg/errors"
+	"io/ioutil"
 	"os"
 )
 
@@ -51,7 +52,7 @@ func parseConfigFile(filename string) (*OcicryptConfig, error) {
 		return nil, nil
 	}
 
-	data, err := os.ReadFile(filename)
+	data, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +72,7 @@ func GetConfiguration() (*OcicryptConfig, error) {
 	if len(filename) > 0 {
 		ic, err = parseConfigFile(filename)
 		if err != nil {
-			return nil, fmt.Errorf("Error while parsing keyprovider config file: %w", err)
+			return nil, errors.Wrap(err, "Error while parsing keyprovider config file")
 		}
 	} else {
 		return nil, nil

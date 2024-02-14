@@ -1,4 +1,3 @@
-//go:build !cgo
 // +build !cgo
 
 /*
@@ -19,12 +18,14 @@
 
 package pkcs11
 
-import "fmt"
+import (
+	"github.com/pkg/errors"
+)
 
 func EncryptMultiple(pubKeys []interface{}, data []byte) ([]byte, error) {
-	return nil, fmt.Errorf("ocicrypt pkcs11 not supported on this build")
+	return nil, errors.Errorf("ocicrypt pkcs11 not supported on this build")
 }
 
 func Decrypt(privKeyObjs []*Pkcs11KeyFileObject, pkcs11blobstr []byte) ([]byte, error) {
-	return nil, fmt.Errorf("ocicrypt pkcs11 not supported on this build")
+	return nil, errors.Errorf("ocicrypt pkcs11 not supported on this build")
 }

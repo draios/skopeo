@@ -17,12 +17,13 @@
 package pkcs11config
 
 import (
-	"errors"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path"
 
 	"github.com/containers/ocicrypt/crypto/pkcs11"
+	"github.com/pkg/errors"
 	"gopkg.in/yaml.v3"
 )
 
@@ -38,11 +39,11 @@ const ENVVARNAME = "OCICRYPT_CONFIG"
 // not exist, so no error is returned.
 // A config file may look like this:
 // module-directories:
-// - /usr/lib64/pkcs11/
-// - /usr/lib/pkcs11/
+//   - /usr/lib64/pkcs11/
+//   - /usr/lib/pkcs11/
 // allowed-module-paths:
-// - /usr/lib64/pkcs11/
-// - /usr/lib/pkcs11/
+//   - /usr/lib64/pkcs11/
+//   - /usr/lib/pkcs11/
 func parseConfigFile(filename string) (*OcicryptConfig, error) {
 	// a non-existent config file is not an error
 	_, err := os.Stat(filename)
@@ -50,7 +51,7 @@ func parseConfigFile(filename string) (*OcicryptConfig, error) {
 		return nil, nil
 	}
 
-	data, err := os.ReadFile(filename)
+	data, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}
