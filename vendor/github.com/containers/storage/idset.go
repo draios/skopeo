@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/containers/storage/pkg/idtools"
+	"github.com/containers/storage/types"
 	"github.com/google/go-intervals/intervalset"
-	"github.com/pkg/errors"
 )
 
 // idSet represents a set of integer IDs. It is stored as an ordered set of intervals.
@@ -116,7 +116,7 @@ func (s *idSet) findAvailable(n int) (*idSet, error) {
 		n -= i.length()
 	}
 	if n > 0 {
-		return nil, errors.New("could not find enough available IDs")
+		return nil, types.ErrNoAvailableIDs
 	}
 	return &idSet{set: intervalset.NewImmutableSet(intervals)}, nil
 }
@@ -257,9 +257,9 @@ func hasOverlappingRanges(mappings []idtools.IDMap) error {
 
 	if conflicts != nil {
 		if len(conflicts) == 1 {
-			return errors.Wrapf(ErrInvalidMappings, "the specified UID and/or GID mapping %s conflicts with other mappings", conflicts[0])
+			return fmt.Errorf("the specified UID and/or GID mapping %s conflicts with other mappings: %w", conflicts[0], ErrInvalidMappings)
 		}
-		return errors.Wrapf(ErrInvalidMappings, "the specified UID and/or GID mappings %s conflict with other mappings", strings.Join(conflicts, ", "))
+		return fmt.Errorf("the specified UID and/or GID mappings %s conflict with other mappings: %w", strings.Join(conflicts, ", "), ErrInvalidMappings)
 	}
 	return nil
 }
