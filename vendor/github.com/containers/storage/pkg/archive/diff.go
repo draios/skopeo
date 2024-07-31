@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/containers/storage/pkg/fileutils"
 	"github.com/containers/storage/pkg/idtools"
 	"github.com/containers/storage/pkg/pools"
 	"github.com/containers/storage/pkg/system"
@@ -84,8 +85,8 @@ func UnpackLayer(dest string, layer io.Reader, options *TarOptions) (size int64,
 			parent := filepath.Dir(hdr.Name)
 			parentPath := filepath.Join(dest, parent)
 
-			if _, err := os.Lstat(parentPath); err != nil && os.IsNotExist(err) {
-				err = os.MkdirAll(parentPath, 0755)
+			if err := fileutils.Lexists(parentPath); err != nil && os.IsNotExist(err) {
+				err = os.MkdirAll(parentPath, 0o755)
 				if err != nil {
 					return 0, err
 				}
@@ -130,7 +131,7 @@ func UnpackLayer(dest string, layer io.Reader, options *TarOptions) (size int64,
 		if strings.HasPrefix(base, WhiteoutPrefix) {
 			dir := filepath.Dir(path)
 			if base == WhiteoutOpaqueDir {
-				_, err := os.Lstat(dir)
+				err := fileutils.Lexists(dir)
 				if err != nil {
 					return 0, err
 				}
@@ -145,6 +146,9 @@ func UnpackLayer(dest string, layer io.Reader, options *TarOptions) (size int64,
 						return nil
 					}
 					if _, exists := unpackedPaths[path]; !exists {
+						if err := resetImmutable(path, nil); err != nil {
+							return err
+						}
 						err := os.RemoveAll(path)
 						return err
 					}
@@ -156,6 +160,9 @@ func UnpackLayer(dest string, layer io.Reader, options *TarOptions) (size int64,
 			} else {
 				originalBase := base[len(WhiteoutPrefix):]
 				originalPath := filepath.Join(dir, originalBase)
+				if err := resetImmutable(originalPath, nil); err != nil {
+					return 0, err
+				}
 				if err := os.RemoveAll(originalPath); err != nil {
 					return 0, err
 				}
@@ -165,7 +172,15 @@ func UnpackLayer(dest string, layer io.Reader, options *TarOptions) (size int64,
 			// The only exception is when it is a directory *and* the file from
 			// the layer is also a directory. Then we want to merge them (i.e.
 			// just apply the metadata from the layer).
+			//
+			// We always reset the immutable flag (if present) to allow metadata
+			// changes and to allow directory modification. The flag will be
+			// re-applied based on the contents of hdr either at the end for
+			// directories or in createTarFile otherwise.
 			if fi, err := os.Lstat(path); err == nil {
+				if err := resetImmutable(path, &fi); err != nil {
+					return 0, err
+				}
 				if !(fi.IsDir() && hdr.Typeflag == tar.TypeDir) {
 					if err := os.RemoveAll(path); err != nil {
 						return 0, err
@@ -215,6 +230,9 @@ func UnpackLayer(dest string, layer io.Reader, options *TarOptions) (size int64,
 		if err := system.Chtimes(path, hdr.AccessTime, hdr.ModTime); err != nil {
 			return 0, err
 		}
+		if err := WriteFileFlagsFromTarHeader(path, hdr); err != nil {
+			return 0, err
+		}
 	}
 
 	return size, nil
@@ -245,7 +263,9 @@ func applyLayerHandler(dest string, layer io.Reader, options *TarOptions, decomp
 	if err != nil {
 		return 0, err
 	}
-	defer system.Umask(oldmask) // ignore err, ErrNotSupportedPlatform
+	defer func() {
+		_, _ = system.Umask(oldmask) // Ignore err. This can only fail with ErrNotSupportedPlatform, in which case we would have failed above.
+	}()
 
 	if decompress {
 		layer, err = DecompressStream(layer)

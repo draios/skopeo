@@ -2,6 +2,7 @@ package idtools
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"os/user"
@@ -227,7 +228,7 @@ func getOverflowUID() int {
 	return overflowUID
 }
 
-// getOverflowUID returns the GID mapped to the overflow user
+// getOverflowGID returns the GID mapped to the overflow user
 func getOverflowGID() int {
 	overflowGIDOnce.Do(func() {
 		// 65534 is the value on older kernels where /proc/sys/kernel/overflowgid is not present
@@ -359,27 +360,84 @@ func parseSubidFile(path, username string) (ranges, error) {
 }
 
 func checkChownErr(err error, name string, uid, gid int) error {
-	if e, ok := err.(*os.PathError); ok && e.Err == syscall.EINVAL {
-		return fmt.Errorf("potentially insufficient UIDs or GIDs available in user namespace (requested %d:%d for %s): Check /etc/subuid and /etc/subgid if configured locally and run podman-system-migrate: %w", uid, gid, name, err)
+	var e *os.PathError
+	if errors.As(err, &e) && e.Err == syscall.EINVAL {
+		return fmt.Errorf(`potentially insufficient UIDs or GIDs available in user namespace (requested %d:%d for %s): Check /etc/subuid and /etc/subgid if configured locally and run "podman system migrate": %w`, uid, gid, name, err)
 	}
 	return err
 }
 
+// Stat contains file states that can be overriden with ContainersOverrideXattr.
+type Stat struct {
+	IDs  IDPair
+	Mode os.FileMode
+}
+
+// FormatContainersOverrideXattr will format the given uid, gid, and mode into a string
+// that can be used as the value for the ContainersOverrideXattr xattr.
+func FormatContainersOverrideXattr(uid, gid, mode int) string {
+	return fmt.Sprintf("%d:%d:0%o", uid, gid, mode&0o7777)
+}
+
+// GetContainersOverrideXattr will get and decode ContainersOverrideXattr.
+func GetContainersOverrideXattr(path string) (Stat, error) {
+	var stat Stat
+	xstat, err := system.Lgetxattr(path, ContainersOverrideXattr)
+	if err != nil {
+		return stat, err
+	}
+
+	attrs := strings.Split(string(xstat), ":")
+	if len(attrs) != 3 {
+		return stat, fmt.Errorf("The number of clons in %s does not equal to 3",
+			ContainersOverrideXattr)
+	}
+
+	value, err := strconv.ParseUint(attrs[0], 10, 32)
+	if err != nil {
+		return stat, fmt.Errorf("Failed to parse UID: %w", err)
+	}
+
+	stat.IDs.UID = int(value)
+
+	value, err = strconv.ParseUint(attrs[0], 10, 32)
+	if err != nil {
+		return stat, fmt.Errorf("Failed to parse GID: %w", err)
+	}
+
+	stat.IDs.GID = int(value)
+
+	value, err = strconv.ParseUint(attrs[2], 8, 32)
+	if err != nil {
+		return stat, fmt.Errorf("Failed to parse mode: %w", err)
+	}
+
+	stat.Mode = os.FileMode(value)
+
+	return stat, nil
+}
+
+// SetContainersOverrideXattr will encode and set ContainersOverrideXattr.
+func SetContainersOverrideXattr(path string, stat Stat) error {
+	value := FormatContainersOverrideXattr(stat.IDs.UID, stat.IDs.GID, int(stat.Mode))
+	return system.Lsetxattr(path, ContainersOverrideXattr, []byte(value), 0)
+}
+
 func SafeChown(name string, uid, gid int) error {
 	if runtime.GOOS == "darwin" {
-		var mode uint64 = 0o0700
+		var mode os.FileMode = 0o0700
 		xstat, err := system.Lgetxattr(name, ContainersOverrideXattr)
 		if err == nil {
 			attrs := strings.Split(string(xstat), ":")
 			if len(attrs) == 3 {
 				val, err := strconv.ParseUint(attrs[2], 8, 32)
 				if err == nil {
-					mode = val
+					mode = os.FileMode(val)
 				}
 			}
 		}
-		value := fmt.Sprintf("%d:%d:0%o", uid, gid, mode)
-		if err = system.Lsetxattr(name, ContainersOverrideXattr, []byte(value), 0); err != nil {
+		value := Stat{IDPair{uid, gid}, mode}
+		if err = SetContainersOverrideXattr(name, value); err != nil {
 			return err
 		}
 		uid = os.Getuid()
@@ -395,19 +453,19 @@ func SafeChown(name string, uid, gid int) error {
 
 func SafeLchown(name string, uid, gid int) error {
 	if runtime.GOOS == "darwin" {
-		var mode uint64 = 0o0700
+		var mode os.FileMode = 0o0700
 		xstat, err := system.Lgetxattr(name, ContainersOverrideXattr)
 		if err == nil {
 			attrs := strings.Split(string(xstat), ":")
 			if len(attrs) == 3 {
 				val, err := strconv.ParseUint(attrs[2], 8, 32)
 				if err == nil {
-					mode = val
+					mode = os.FileMode(val)
 				}
 			}
 		}
-		value := fmt.Sprintf("%d:%d:0%o", uid, gid, mode)
-		if err = system.Lsetxattr(name, ContainersOverrideXattr, []byte(value), 0); err != nil {
+		value := Stat{IDPair{uid, gid}, mode}
+		if err = SetContainersOverrideXattr(name, value); err != nil {
 			return err
 		}
 		uid = os.Getuid()

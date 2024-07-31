@@ -17,14 +17,13 @@ package schema
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"regexp"
 
 	digest "github.com/opencontainers/go-digest"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/pkg/errors"
 	"github.com/xeipuuv/gojsonschema"
 )
 
@@ -52,9 +51,9 @@ func (e ValidationError) Error() string {
 
 // Validate validates the given reader against the schema of the wrapped media type.
 func (v Validator) Validate(src io.Reader) error {
-	buf, err := ioutil.ReadAll(src)
+	buf, err := io.ReadAll(src)
 	if err != nil {
-		return errors.Wrap(err, "unable to read the document file")
+		return fmt.Errorf("unable to read the document file: %w", err)
 	}
 
 	if f, ok := mapValidate[v]; ok {
@@ -67,14 +66,13 @@ func (v Validator) Validate(src io.Reader) error {
 		}
 	}
 
-	sl := newFSLoaderFactory(schemaNamespaces, fs).New(specs[v])
+	sl := newFSLoaderFactory(schemaNamespaces, FileSystem()).New(specs[v])
 	ml := gojsonschema.NewStringLoader(string(buf))
 
 	result, err := gojsonschema.Validate(sl, ml)
 	if err != nil {
-		return errors.Wrapf(
-			WrapSyntaxError(bytes.NewReader(buf), err),
-			"schema %s: unable to validate", v)
+		return fmt.Errorf("schema %s: unable to validate: %w", v,
+			WrapSyntaxError(bytes.NewReader(buf), err))
 	}
 
 	if result.Valid() {
@@ -93,21 +91,21 @@ func (v Validator) Validate(src io.Reader) error {
 
 type unimplemented string
 
-func (v unimplemented) Validate(src io.Reader) error {
+func (v unimplemented) Validate(_ io.Reader) error {
 	return fmt.Errorf("%s: unimplemented", v)
 }
 
 func validateManifest(r io.Reader) error {
 	header := v1.Manifest{}
 
-	buf, err := ioutil.ReadAll(r)
+	buf, err := io.ReadAll(r)
 	if err != nil {
-		return errors.Wrapf(err, "error reading the io stream")
+		return fmt.Errorf("error reading the io stream: %w", err)
 	}
 
 	err = json.Unmarshal(buf, &header)
 	if err != nil {
-		return errors.Wrap(err, "manifest format mismatch")
+		return fmt.Errorf("manifest format mismatch: %w", err)
 	}
 
 	if header.Config.MediaType != string(v1.MediaTypeImageConfig) {
@@ -118,9 +116,9 @@ func validateManifest(r io.Reader) error {
 		if layer.MediaType != string(v1.MediaTypeImageLayer) &&
 			layer.MediaType != string(v1.MediaTypeImageLayerGzip) &&
 			layer.MediaType != string(v1.MediaTypeImageLayerZstd) &&
-			layer.MediaType != string(v1.MediaTypeImageLayerNonDistributable) &&
-			layer.MediaType != string(v1.MediaTypeImageLayerNonDistributableGzip) &&
-			layer.MediaType != string(v1.MediaTypeImageLayerNonDistributableZstd) {
+			layer.MediaType != string(v1.MediaTypeImageLayerNonDistributable) && //nolint:staticcheck
+			layer.MediaType != string(v1.MediaTypeImageLayerNonDistributableGzip) && //nolint:staticcheck
+			layer.MediaType != string(v1.MediaTypeImageLayerNonDistributableZstd) { //nolint:staticcheck
 			fmt.Printf("warning: layer %s has an unknown media type: %s\n", layer.Digest, layer.MediaType)
 		}
 	}
@@ -130,18 +128,18 @@ func validateManifest(r io.Reader) error {
 func validateDescriptor(r io.Reader) error {
 	header := v1.Descriptor{}
 
-	buf, err := ioutil.ReadAll(r)
+	buf, err := io.ReadAll(r)
 	if err != nil {
-		return errors.Wrapf(err, "error reading the io stream")
+		return fmt.Errorf("error reading the io stream: %w", err)
 	}
 
 	err = json.Unmarshal(buf, &header)
 	if err != nil {
-		return errors.Wrap(err, "descriptor format mismatch")
+		return fmt.Errorf("descriptor format mismatch: %w", err)
 	}
 
 	err = header.Digest.Validate()
-	if err == digest.ErrDigestUnsupported {
+	if errors.Is(err, digest.ErrDigestUnsupported) {
 		// we ignore unsupported algorithms
 		fmt.Printf("warning: unsupported digest: %q: %v\n", header.Digest, err)
 		return nil
@@ -152,14 +150,14 @@ func validateDescriptor(r io.Reader) error {
 func validateIndex(r io.Reader) error {
 	header := v1.Index{}
 
-	buf, err := ioutil.ReadAll(r)
+	buf, err := io.ReadAll(r)
 	if err != nil {
-		return errors.Wrapf(err, "error reading the io stream")
+		return fmt.Errorf("error reading the io stream: %w", err)
 	}
 
 	err = json.Unmarshal(buf, &header)
 	if err != nil {
-		return errors.Wrap(err, "index format mismatch")
+		return fmt.Errorf("index format mismatch: %w", err)
 	}
 
 	for _, manifest := range header.Manifests {
@@ -179,14 +177,14 @@ func validateIndex(r io.Reader) error {
 func validateConfig(r io.Reader) error {
 	header := v1.Image{}
 
-	buf, err := ioutil.ReadAll(r)
+	buf, err := io.ReadAll(r)
 	if err != nil {
-		return errors.Wrapf(err, "error reading the io stream")
+		return fmt.Errorf("error reading the io stream: %w", err)
 	}
 
 	err = json.Unmarshal(buf, &header)
 	if err != nil {
-		return errors.Wrap(err, "config format mismatch")
+		return fmt.Errorf("config format mismatch: %w", err)
 	}
 
 	checkPlatform(header.OS, header.Architecture)
@@ -195,7 +193,7 @@ func validateConfig(r io.Reader) error {
 	envRegexp := regexp.MustCompile(`^[^=]+=.*$`)
 	for _, e := range header.Config.Env {
 		if !envRegexp.MatchString(e) {
-			return errors.Errorf("unexpected env: %q", e)
+			return fmt.Errorf("unexpected env: %q", e)
 		}
 	}
 
@@ -213,6 +211,7 @@ func checkArchitecture(Architecture string, Variant string) {
 		"mips64":   {""},
 		"mips64le": {""},
 		"s390x":    {""},
+		"riscv64":  {""},
 	}
 	for arch, variants := range validCombins {
 		if arch == Architecture {
@@ -233,7 +232,7 @@ func checkPlatform(OS string, Architecture string) {
 		"darwin":    {"386", "amd64", "arm", "arm64"},
 		"dragonfly": {"amd64"},
 		"freebsd":   {"386", "amd64", "arm"},
-		"linux":     {"386", "amd64", "arm", "arm64", "ppc64", "ppc64le", "mips64", "mips64le", "s390x"},
+		"linux":     {"386", "amd64", "arm", "arm64", "ppc64", "ppc64le", "mips64", "mips64le", "s390x", "riscv64"},
 		"netbsd":    {"386", "amd64", "arm"},
 		"openbsd":   {"386", "amd64", "arm"},
 		"plan9":     {"386", "amd64"},

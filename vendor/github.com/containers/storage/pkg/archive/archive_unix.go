@@ -1,5 +1,5 @@
-//go:build !windows && !freebsd
-// +build !windows,!freebsd
+//go:build !windows
+// +build !windows
 
 package archive
 
@@ -14,6 +14,31 @@ import (
 	"github.com/containers/storage/pkg/system"
 	"golang.org/x/sys/unix"
 )
+
+func init() {
+	sysStatOverride = statUnix
+}
+
+// statUnix populates hdr from system-dependent fields of fi without performing
+// any OS lookups.
+// Adapted from Moby.
+func statUnix(fi os.FileInfo, hdr *tar.Header) error {
+	s, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return nil
+	}
+
+	hdr.Uid = int(s.Uid)
+	hdr.Gid = int(s.Gid)
+
+	if s.Mode&unix.S_IFBLK != 0 ||
+		s.Mode&unix.S_IFCHR != 0 {
+		hdr.Devmajor = int64(unix.Major(uint64(s.Rdev))) //nolint: unconvert
+		hdr.Devminor = int64(unix.Minor(uint64(s.Rdev))) //nolint: unconvert
+	}
+
+	return nil
+}
 
 // fixVolumePathPrefix does platform specific processing to ensure that if
 // the path being passed in is not in a volume path format, convert it to one.
@@ -50,8 +75,8 @@ func setHeaderForSpecialDevice(hdr *tar.Header, name string, stat interface{}) (
 		// Currently go does not fill in the major/minors
 		if s.Mode&unix.S_IFBLK != 0 ||
 			s.Mode&unix.S_IFCHR != 0 {
-			hdr.Devmajor = int64(major(uint64(s.Rdev))) // nolint: unconvert
-			hdr.Devminor = int64(minor(uint64(s.Rdev))) // nolint: unconvert
+			hdr.Devmajor = int64(major(uint64(s.Rdev))) //nolint: unconvert
+			hdr.Devminor = int64(minor(uint64(s.Rdev))) //nolint: unconvert
 		}
 	}
 
@@ -88,7 +113,7 @@ func minor(device uint64) uint64 {
 // handleTarTypeBlockCharFifo is an OS-specific helper function used by
 // createTarFile to handle the following types of header: Block; Char; Fifo
 func handleTarTypeBlockCharFifo(hdr *tar.Header, path string) error {
-	mode := uint32(hdr.Mode & 07777)
+	mode := uint32(hdr.Mode & 0o7777)
 	switch hdr.Typeflag {
 	case tar.TypeBlock:
 		mode |= unix.S_IFBLK
@@ -99,25 +124,6 @@ func handleTarTypeBlockCharFifo(hdr *tar.Header, path string) error {
 	}
 
 	return system.Mknod(path, mode, system.Mkdev(hdr.Devmajor, hdr.Devminor))
-}
-
-func handleLChmod(hdr *tar.Header, path string, hdrInfo os.FileInfo, forceMask *os.FileMode) error {
-	permissionsMask := hdrInfo.Mode()
-	if forceMask != nil {
-		permissionsMask = *forceMask
-	}
-	if hdr.Typeflag == tar.TypeLink {
-		if fi, err := os.Lstat(hdr.Linkname); err == nil && (fi.Mode()&os.ModeSymlink == 0) {
-			if err := os.Chmod(path, permissionsMask); err != nil {
-				return err
-			}
-		}
-	} else if hdr.Typeflag != tar.TypeSymlink {
-		if err := os.Chmod(path, permissionsMask); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // Hardlink without symlinks

@@ -60,6 +60,8 @@ const (
 	FsMagicCephFs = FsMagic(0x00C36400)
 	// FsMagicCIFS filesystem id for CIFS
 	FsMagicCIFS = FsMagic(0xFF534D42)
+	// FsMagicEROFS filesystem id for EROFS
+	FsMagicEROFS = FsMagic(0xE0F5E1E2)
 	// FsMagicFHGFS filesystem id for FHGFS
 	FsMagicFHGFSFs = FsMagic(0x19830326)
 	// FsMagicIBRIX filesystem id for IBRIX
@@ -90,10 +92,8 @@ const (
 
 var (
 	// Slice of drivers that should be used in an order
-	priority = []string{
+	Priority = []string{
 		"overlay",
-		// We don't support devicemapper without configuration
-		// "devicemapper",
 		"aufs",
 		"btrfs",
 		"zfs",
@@ -106,6 +106,7 @@ var (
 		FsMagicBtrfs:       "btrfs",
 		FsMagicCramfs:      "cramfs",
 		FsMagicEcryptfs:    "ecryptfs",
+		FsMagicEROFS:       "erofs",
 		FsMagicExtfs:       "extfs",
 		FsMagicF2fs:        "f2fs",
 		FsMagicGPFS:        "gpfs",
@@ -161,8 +162,7 @@ func NewDefaultChecker() Checker {
 	return &defaultChecker{}
 }
 
-type defaultChecker struct {
-}
+type defaultChecker struct{}
 
 func (c *defaultChecker) IsMounted(path string) bool {
 	m, _ := mount.Mounted(path)

@@ -6,16 +6,15 @@ import (
 	"github.com/containers/storage/pkg/archive"
 )
 
-func chroot(path string) error {
-	return nil
-}
-
-func invokeUnpack(decompressedArchive io.ReadCloser,
+func invokeUnpack(decompressedArchive io.Reader,
 	dest string,
-	options *archive.TarOptions, root string) error {
+	options *archive.TarOptions, root string,
+) error {
+	_ = root // Restricting the operation to this root is not implemented on macOS
 	return archive.Unpack(decompressedArchive, dest, options)
 }
 
 func invokePack(srcPath string, options *archive.TarOptions, root string) (io.ReadCloser, error) {
+	_ = root // Restricting the operation to this root is not implemented on macOS
 	return archive.TarWithOptions(srcPath, options)
 }

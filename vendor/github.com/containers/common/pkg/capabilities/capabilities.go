@@ -6,11 +6,13 @@ package capabilities
 //       changed significantly to fit the needs of libpod.
 
 import (
+	"errors"
+	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 
-	"github.com/pkg/errors"
 	"github.com/syndtr/gocapability/capability"
 )
 
@@ -51,16 +53,6 @@ func init() {
 		capabilityList = append(capabilityList, getCapName(cap))
 		sort.Strings(capabilityList)
 	}
-}
-
-// stringInSlice determines if a string is in a string slice, returns bool
-func stringInSlice(s string, sl []string) bool {
-	for _, i := range sl {
-		if i == s {
-			return true
-		}
-	}
-	return false
 }
 
 var (
@@ -104,8 +96,8 @@ func AllCapabilities() []string {
 // NormalizeCapabilities normalizes caps by adding a "CAP_" prefix (if not yet
 // present).
 func NormalizeCapabilities(caps []string) ([]string, error) {
-	normalized := make([]string, len(caps))
-	for i, c := range caps {
+	normalized := make([]string, 0, len(caps))
+	for _, c := range caps {
 		c = strings.ToUpper(c)
 		if c == All {
 			normalized = append(normalized, c)
@@ -114,10 +106,10 @@ func NormalizeCapabilities(caps []string) ([]string, error) {
 		if !strings.HasPrefix(c, "CAP_") {
 			c = "CAP_" + c
 		}
-		if !stringInSlice(c, capabilityList) {
-			return nil, errors.Wrapf(ErrUnknownCapability, "%q", c)
+		if !slices.Contains(capabilityList, c) {
+			return nil, fmt.Errorf("%q: %w", c, ErrUnknownCapability)
 		}
-		normalized[i] = c
+		normalized = append(normalized, c)
 	}
 	sort.Strings(normalized)
 	return normalized, nil
@@ -126,8 +118,8 @@ func NormalizeCapabilities(caps []string) ([]string, error) {
 // ValidateCapabilities validates if caps only contains valid capabilities.
 func ValidateCapabilities(caps []string) error {
 	for _, c := range caps {
-		if !stringInSlice(c, capabilityList) {
-			return errors.Wrapf(ErrUnknownCapability, "%q", c)
+		if !slices.Contains(capabilityList, c) {
+			return fmt.Errorf("%q: %w", c, ErrUnknownCapability)
 		}
 	}
 	return nil
@@ -140,8 +132,6 @@ func ValidateCapabilities(caps []string) error {
 // "ALL" in capAdd adds returns known capabilities
 // "All" in capDrop returns only the capabilities specified in capAdd
 func MergeCapabilities(base, adds, drops []string) ([]string, error) {
-	var caps []string
-
 	// Normalize the base capabilities
 	base, err := NormalizeCapabilities(base)
 	if err != nil {
@@ -160,8 +150,8 @@ func MergeCapabilities(base, adds, drops []string) ([]string, error) {
 		return nil, err
 	}
 
-	if stringInSlice(All, capDrop) {
-		if stringInSlice(All, capAdd) {
+	if slices.Contains(capDrop, All) {
+		if slices.Contains(capAdd, All) {
 			return nil, errors.New("adding all caps and removing all caps not allowed")
 		}
 		// "Drop" all capabilities; return what's in capAdd instead
@@ -169,7 +159,7 @@ func MergeCapabilities(base, adds, drops []string) ([]string, error) {
 		return capAdd, nil
 	}
 
-	if stringInSlice(All, capAdd) {
+	if slices.Contains(capAdd, All) {
 		base, err = BoundingSet()
 		if err != nil {
 			return nil, err
@@ -177,21 +167,22 @@ func MergeCapabilities(base, adds, drops []string) ([]string, error) {
 		capAdd = []string{}
 	} else {
 		for _, add := range capAdd {
-			if stringInSlice(add, capDrop) {
-				return nil, errors.Errorf("capability %q cannot be dropped and added", add)
+			if slices.Contains(capDrop, add) {
+				return nil, fmt.Errorf("capability %q cannot be dropped and added", add)
 			}
 		}
 	}
 
 	for _, drop := range capDrop {
-		if stringInSlice(drop, capAdd) {
-			return nil, errors.Errorf("capability %q cannot be dropped and added", drop)
+		if slices.Contains(capAdd, drop) {
+			return nil, fmt.Errorf("capability %q cannot be dropped and added", drop)
 		}
 	}
 
+	caps := make([]string, 0, len(base)+len(capAdd))
 	// Drop any capabilities in capDrop that are in base
 	for _, cap := range base {
-		if stringInSlice(cap, capDrop) {
+		if slices.Contains(capDrop, cap) {
 			continue
 		}
 		caps = append(caps, cap)
@@ -199,7 +190,7 @@ func MergeCapabilities(base, adds, drops []string) ([]string, error) {
 
 	// Add any capabilities in capAdd that are not in base
 	for _, cap := range capAdd {
-		if stringInSlice(cap, base) {
+		if slices.Contains(base, cap) {
 			continue
 		}
 		caps = append(caps, cap)
