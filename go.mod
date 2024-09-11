@@ -1,8 +1,8 @@
 module github.com/containers/skopeo
 
-go 1.22.4
+go 1.22
 
-toolchain go1.22.5
+toolchain go1.22.7
 
 require (
 	github.com/containers/common v0.48.0
