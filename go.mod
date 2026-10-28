@@ -1,6 +1,6 @@
 module github.com/containers/skopeo
 
-go 1.26.8
+go 1.26.10
 
 require (
 	github.com/containers/ocicrypt v1.3.2
@@ -50,7 +50,7 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dsnet/compress v0.0.2-0.20210315054119-f66993602bf5 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.6 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/go-containerregistry v0.21.7 // indirect
@@ -103,7 +103,7 @@ require (
 	go.podman.io/image/v5 v5.41.0
 	go.podman.io/storage v1.64.0
 	golang.org/x/crypto v0.57.0 // indirect
-	golang.org/x/net v0.58.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/term v0.46.0 // indirect
